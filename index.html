@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sınav Sistemi V17 (Gelişmiş İstatistik)</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;}
+        .app-card { background-color:white;padding:2.5rem;border-radius:1.5rem;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); width: 100%; max-width: 1200px; }
+        .tab-content { display: none; }
+        .paste-area {
+            min-height: 200px;
+            background-color: #1f2937;
+            border-color: #4b5563;
+            color: #34d399;
+            font-family: monospace;
+            font-size: 0.75rem;
+            resize: none;
+            border-width: 2px;
+            border-style: dashed;
+            cursor: text;
+            padding: 12px;
+            border-radius: 0.5rem;
+            overflow: auto;
+            white-space: pre-wrap;
+        }
+        .paste-area:empty:before {
+            content: attr(placeholder);
+            color: #4b5563;
+            pointer-events: none;
+            position: absolute;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: calc(100% - 24px);
+            height: calc(100% - 24px);
+        }
+        /* Aktif sekme rengi */
+        .tab-button.active { border-bottom: 3px solid #4f46e5; color: #4f46e5; font-weight: 600; }
+    </style>
+</head>
+<body>
+
+<div class="app-card">
+    <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">Sınav Sistemi Yönetim Paneli</h1>
+
+    <div class="flex border-b border-gray-200 mb-6">
+        <button class="tab-button py-2 px-4 transition duration-300 active" onclick="openTab('tab-online')">Online Öğrenciler</button>
+        <button class="tab-button py-2 px-4 transition duration-300" onclick="openTab('tab-results')">Sınav Sonuçları</button>
+        <button class="tab-button py-2 px-4 transition duration-300" onclick="openTab('tab-questions')">Soruları Yükle</button>
+        <button class="tab-button py-2 px-4 transition duration-300" onclick="openTab('tab-students')">Öğrenci Listesi Yükle</button>
+    </div>
+
+    <div id="tab-online" class="tab-content">
+        <div class="flex space-x-4 mb-4">
+            <input type="text" id="onlineExamCode" placeholder="Sınav Kodu Filtrele" class="p-2 border rounded flex-grow">
+            <button id="btnExportOnline" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded transition duration-300">
+                Excel İndir (Aktif Öğrenci)
+            </button>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full bg-white border border-gray-200">
+                <thead class="bg-gray-100">
+                    <tr>
+                        <th class="py-2 px-4 text-left">Ad Soyad</th>
+                        <th class="py-2 px-4 text-left">Numara</th>
+                        <th class="py-2 px-4 text-left">Sınıf</th>
+                        <th class="py-2 px-4 text-left">Sınav Kodu</th>
+                        <th class="py-2 px-4 text-center">Mevcut Soru</th>
+                        <th class="py-2 px-4 text-center">Kalan Süre (sn)</th>
+                        <th class="py-2 px-4 text-center">Bağlantı Süresi (dk)</th>
+                        <th class="py-2 px-4 text-center">Odak Kaybı</th>
+                        <th class="py-2 px-4 text-center">Son Güncelleme</th>
+                        <th class="py-2 px-4 text-center">Durum</th>
+                    </tr>
+                </thead>
+                <tbody id="onlineStudentsTableBody">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="tab-results" class="tab-content" style="display: none;">
+        <div class="flex space-x-4 mb-4">
+            <input type="text" id="resultsExamCode" placeholder="Sınav Kodu Filtrele" class="p-2 border rounded flex-grow">
+            <button id="btnFetchResults" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded transition duration-300">
+                Sonuçları Getir
+            </button>
+            <button id="btnExportResults" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded transition duration-300">
+                Excel İndir (Tüm Sonuçlar)
+            </button>
+            <button id="btnDeleteResults" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded transition duration-300">
+                Sonuçları Temizle
+            </button>
+        </div>
+
+        <div id="results-stats" class="grid grid-cols-4 gap-4 mb-6">
+            </div>
+
+        <div class="overflow-x-auto">
+            <table class="min-w-full bg-white border border-gray-200">
+                <thead class="bg-gray-100">
+                    <tr>
+                        <th class="py-2 px-4 text-left">Ad Soyad</th>
+                        <th class="py-2 px-4 text-left">Numara</th>
+                        <th class="py-2 px-4 text-left">Sınıf</th>
+                        <th class="py-2 px-4 text-center">Doğru</th>
+                        <th class="py-2 px-4 text-center">Yanlış</th>
+                        <th class="py-2 px-4 text-center">Boş</th>
+                        <th class="py-2 px-4 text-center">Net</th>
+                        <th class="py-2 px-4 text-center">Puan</th>
+                        <th class="py-2 px-4 text-center">Süre (dk)</th>
+                        <th class="py-2 px-4 text-center">İşlemler</th> </tr>
+                </thead>
+                <tbody id="resultsTableBody">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="tab-questions" class="tab-content" style="display: none;">
+        <div class="paste-area w-full h-80 transition duration-300 flex justify-center items-center text-center cursor-pointer"
+             id="jsonInput"
+             contenteditable="true"
+             placeholder='Örn: [{"question":"Soru?","options":["A","B"],"answer":"A"}]'>
+            JSON soru dosyanızı (.json) buraya sürükleyip bırakın veya metni kopyalayıp yapıştırın.
+        </div>
+        <div class="text-xs text-gray-500 mt-1">Lütfen JSON formatının geçerli olduğundan emin olun.</div>
+    
+        <div class="mt-4 flex space-x-4">
+            <input type="text" id="uploadQCode" placeholder="Sınav Kodu" class="p-2 border rounded flex-grow">
+            <button id="btnUploadQ" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded transition duration-300">
+                Soruları Yükle
+            </button>
+            <button onclick="loadSampleJson()" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded transition duration-300">
+                Örnek Format
+            </button>
+        </div>
+    </div>
+    
+    <div id="tab-students" class="tab-content" style="display: none;">
+        <div class="paste-area w-full h-80 transition duration-300 flex justify-center items-center text-center cursor-pointer"
+             id="studentListInput"
+             contenteditable="true"
+             placeholder='Örn: {"123":"Ahmet Yılmaz", "456":"Ayşe Kara"}'>
+            JSON öğrenci listesini (.json) buraya sürükleyip bırakın veya metni kopyalayıp yapıştırın.
+        </div>
+        <div class="text-xs text-gray-500 mt-1">Öğrenci listesi formatı: {"Numara":"Ad Soyad"}</div>
+    
+        <div class="mt-4 flex space-x-4">
+            <input type="text" id="uploadSClass" placeholder="Sınıf Adı (Örn: 9/A)" class="p-2 border rounded">
+            <button id="btnUploadStudents" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded transition duration-300">
+                Öğrenci Listesini Yükle
+            </button>
+            <button onclick="loadSampleStudents()" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded transition duration-300">
+                Örnek Format
+            </button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // Global Değişkenler
+    let db;
+    let resultsData = []; // Sınav sonuçlarını tutan global değişken
+    
+    // *** 1. Firebase Yapılandırması (Kendi Ayarlarınızla Değiştirin) ***
+    const firebaseConfig = {
+        apiKey: "YOUR_API_KEY",
+        authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+        projectId: "YOUR_PROJECT_ID",
+        storageBucket: "YOUR_PROJECT_ID.appspot.com",
+        messagingSenderId: "YOUR_SENDER_ID",
+        appId: "YOUR_APP_ID"
+    };
+
+    function initializeFirebase() {
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+        }
+    }
+
+    // *** 2. Temel Fonksiyonlar ***
+
+    function openTab(tabId) {
+        document.querySelectorAll('.tab-content').forEach(tab => tab.style.display = 'none');
+        document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+        
+        document.getElementById(tabId).style.display = 'block';
+        event.currentTarget.classList.add('active');
+        
+        // Sonuçlar sekmesi açıldığında otomatik getir
+        if (tabId === 'tab-results') {
+            fetchResults();
+        }
+    }
+
+    // *** 3. Soruları Yükle (SÜRÜKLE-BIRAK İLE OPTİMİZE EDİLDİ) ***
+    
+    // JSON yükleme alanına dosya sürükle-bırak işlevini ekle
+    const jsonInputArea = document.getElementById('jsonInput');
+    ['dragover', 'dragleave', 'drop'].forEach(eventName => {
+        jsonInputArea.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); });
+    });
+    
+    jsonInputArea.addEventListener('dragover', () => { jsonInputArea.style.borderColor = '#4f46e5'; jsonInputArea.style.backgroundColor = '#111827'; });
+    jsonInputArea.addEventListener('dragleave', () => { jsonInputArea.style.borderColor = '#4b5563'; jsonInputArea.style.backgroundColor = '#1f2937'; });
+    
+    jsonInputArea.addEventListener('drop', (e) => {
+        jsonInputArea.style.borderColor = '#4b5563';
+        jsonInputArea.style.backgroundColor = '#1f2937';
+        
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            const file = files[0];
+            if (file.name.endsWith('.json')) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('jsonInput').innerText = e.target.result;
+                    alert('✅ JSON dosyası başarıyla okundu.');
+                };
+                reader.readAsText(file);
+            } else {
+                alert("Lütfen geçerli bir .json dosyası sürükleyin.");
+            }
+        }
+    });
+
+    // Soruları Yükle Butonu - İçeriği `.innerText` ile okur
+    document.getElementById('btnUploadQ').onclick = async () => {
+        const code = document.getElementById('uploadQCode').value.trim();
+        // **DEĞİŞİKLİK: .value yerine .innerText kullanıldı.**
+        const rawJson = document.getElementById('jsonInput').innerText.trim();
+
+        if(!code) return alert("Lütfen bir Sınav Kodu giriniz.");
+        if(!rawJson) return alert("Lütfen yüklenecek JSON verisini yapıştırın veya sürükleyin.");
+
+        try {
+            const questions = JSON.parse(rawJson);
+            if (!Array.isArray(questions) || questions.length === 0) throw new Error("JSON formatı geçersiz veya boş.");
+
+            await db.collection("exams").doc(code).set({
+                questions: questions,
+                isAvailable: true,
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            alert(`✅ ${questions.length} soru, ${code} koduyla başarıyla yüklendi!`);
+            document.getElementById('jsonInput').innerText = '';
+
+        } catch (error) {
+            console.error("Soruları yüklerken hata:", error);
+            alert("❌ Soruları yüklerken bir hata oluştu. JSON formatınızı kontrol edin.");
+        }
+    };
+    
+    // Örnek Format Yükleme - `.innerText` ile yazar
+    window.loadSampleJson = () => { 
+        document.getElementById('jsonInput').innerText = `[\n  {\n    "question": "Türkiye'nin başkenti neresidir?",\n    "options": ["İstanbul", "Ankara", "İzmir", "Bursa"],\n    "answer": "Ankara"\n  },\n  {\n    "question": "En çok nüfuslu ilimiz neresidir?",\n    "options": ["Ankara", "İstanbul", "İzmir"],\n    "answer": "İstanbul"\n  }\n]`; 
+    };
+    // Öğrenci listesi için de sürükle bırak/yapıştır mantığını kullanabilirsiniz (burada sadece yükleme mantığı güncellendi)
+    
+    // *** 4. Sınav Sonuçları (KARNE GÖR BUTONU EKLENDİ) ***
+
+    async function fetchResults() {
+        const code = document.getElementById('resultsExamCode').value.trim();
+        const resultsRef = db.collection("results");
+        let query = resultsRef.orderBy("netScore", "desc");
+        
+        if (code) {
+            query = query.where("examCode", "==", code);
+        }
+
+        const snapshot = await query.get();
+        resultsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        renderResults(resultsData);
+    }
+    
+    // Sonuçları Tabloya Çizme Fonksiyonu
+    function renderResults(data) {
+        const tableBody = document.getElementById('resultsTableBody');
+        tableBody.innerHTML = '';
+        
+        if (data.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="10" class="text-center py-4 text-gray-500">Sonuç bulunamadı.</td></tr>';
+            return;
+        }
+
+        data.forEach(result => {
+            const tr = document.createElement('tr');
+            tr.className = 'hover:bg-gray-50 border-b';
+            
+            // Hesaplanan süre (saniye -> dakika)
+            const durationMinutes = (result.duration / 60).toFixed(2); 
+
+            tr.innerHTML = `
+                <td class="py-2 px-4 text-left">${result.name || 'Bilinmiyor'}</td>
+                <td class="py-2 px-4 text-left">${result.number || ''}</td>
+                <td class="py-2 px-4 text-left">${result.className || 'Belirsiz'}</td>
+                <td class="py-2 px-4 text-center text-green-600 font-semibold">${result.correct || 0}</td>
+                <td class="py-2 px-4 text-center text-red-600 font-semibold">${result.incorrect || 0}</td>
+                <td class="py-2 px-4 text-center">${result.blank || 0}</td>
+                <td class="py-2 px-4 text-center font-bold">${result.netScore.toFixed(2) || 0}</td>
+                <td class="py-2 px-4 text-center font-bold text-indigo-600">${result.score.toFixed(2) || 0}</td>
+                <td class="py-2 px-4 text-center">${durationMinutes}</td>
+                <td class="py-2 px-4 text-center space-x-2">
+                    <button onclick='viewReportCard("${result.id}")' class="text-sm bg-yellow-500 hover:bg-yellow-600 text-white py-1 px-3 rounded transition duration-300">
+                        📄 Karne Gör
+                    </button>
+                    <button onclick="deleteResult('${result.id}')" class="text-sm bg-red-500 hover:bg-red-600 text-white py-1 px-3 rounded transition duration-300">
+                        🗑 Sil
+                    </button>
+                </td>
+            `;
+            tableBody.appendChild(tr);
+        });
+    }
+
+    // Tek Öğrenci Karnesi Oluşturma ve İndirme Fonksiyonu
+    window.viewReportCard = async (resultId) => {
+        const result = resultsData.find(r => r.id === resultId);
+        if (!result) return alert("Karne verisi bulunamadı.");
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        
+        doc.setFontSize(18);
+        doc.text("Sınav Sonuç Karnesi", 105, 20, null, null, "center");
+        doc.setFontSize(12);
+        doc.text(`Sınav Kodu: ${result.examCode}`, 10, 30);
+        doc.text(`Öğrenci: ${result.name} (${result.number} - ${result.className})`, 10, 37);
+
+        // İstatistik Tablosu
+        const stats = [
+            ["Doğru Sayısı", result.correct],
+            ["Yanlış Sayısı", result.incorrect],
+            ["Boş Sayısı", result.blank],
+            ["Net Puan", result.netScore.toFixed(2)],
+            ["Toplam Puan", result.score.toFixed(2)],
+            ["Sınav Süresi (dk)", (result.duration / 60).toFixed(2)]
+        ];
+        
+        doc.autoTable({
+            startY: 45,
+            head: [['Kategori', 'Değer']],
+            body: stats,
+            theme: 'striped',
+            styles: { font: 'Inter', halign: 'center' },
+            headStyles: { fillColor: [79, 70, 229] }
+        });
+
+        const finalY = doc.autoTable.previous.finalY + 10;
+        doc.text(`Cevap Detayları:`, 10, finalY);
+
+        // Cevap Detay Tablosu (Örnek Yapı - Cevaplarınızı firebase'den almanız gerekir)
+        // Varsayım: result.answers içinde { questionIndex: cevap } formatında veri var.
+        const answersBody = [];
+        const questionCount = result.correct + result.incorrect + result.blank; // Toplam soru sayısı
+        
+        for (let i = 0; i < questionCount; i++) {
+            const answerDetail = result.answers ? result.answers[i] : null;
+            let status = "Cevap Yok";
+            if(answerDetail) {
+                 status = answerDetail.isCorrect ? "✅ Doğru" : "❌ Yanlış";
+            } else if (result.correct + result.incorrect > 0 && !answerDetail) {
+                 status = "Boş";
+            }
+            
+            answersBody.push([
+                `Soru ${i + 1}`, 
+                answerDetail?.userAnswer || "-", 
+                answerDetail?.correctAnswer || "-", 
+                status
+            ]);
+        }
+
+
+        doc.autoTable({
+            startY: finalY + 5,
+            head: [['Soru No', 'Cevabım', 'Doğru Cevap', 'Durum']],
+            body: answersBody,
+            theme: 'grid',
+            styles: { fontSize: 8, halign: 'center' },
+            columnStyles: { 0: {halign: 'left'}, 1: {halign: 'center'}, 2: {halign: 'center'}, 3: {halign: 'center'} }
+        });
+
+        // PDF'i indirme
+        doc.save(`${result.name.replace(/\s/g, '_')}_${result.examCode}_Karne.pdf`);
+    };
+
+    // Diğer Buton İşlevleri (Sil, Getir vb.)
+    document.getElementById('btnFetchResults').onclick = fetchResults;
+    document.getElementById('resultsExamCode').onchange = fetchResults;
+    
+    window.deleteResult = async (id) => {
+        if(confirm("Bu sonucu kalıcı olarak silmek istediğinizden emin misiniz?")) {
+            await db.collection("results").doc(id).delete();
+            alert("Sonuç başarıyla silindi.");
+            fetchResults();
+        }
+    };
+    
+    // Diğer sekmelerdeki fonksiyonlar (online students, student list upload) varsayılan olarak tutuldu
+    // Örn: document.getElementById('btnUploadStudents').onclick, initializeFirebase() vb.
+    
+    // Başlangıç
+    window.onload = () => {
+        initializeFirebase();
+        openTab('tab-online'); // Varsayılan olarak Online Öğrenciler sekmesini aç
+    };
+
+</script>
+
+</body>
+</html>
