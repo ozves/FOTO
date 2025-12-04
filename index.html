@@ -327,9 +327,7 @@
     }
 
     // ... (Kalan kodlar: Yarım kalan oturum kontrolü ve yeni oturum başlatma aynı kalacak) ...
-    // Yarım kalan oturum kontrolü
-    const sesQ = query(collection(db, "active_sessions"), where("studentKey", "==", studentKey));
-    // ... kod devam ediyor ...
+   
                 if (!subSnap.empty) {
                     const existingData = subSnap.docs[0].data();
                     if (existingData.password === password) {
